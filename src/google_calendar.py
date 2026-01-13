@@ -4,11 +4,14 @@ from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 from datetime import date, datetime, time, timedelta
 from src.scraper import Entry
+from dotenv import load_dotenv
 
+import requests
 import os
 
 load_dotenv()
 
+NTFY_TOPIC = os.getenv('NTFY_TOPIC')
 CALENDAR_ID = os.getenv("CALENDAR_ID")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE")
 TIMEZONE = os.getenv("TIMEZONE", "America/Chicago")
@@ -82,40 +85,63 @@ def delete_event(event_id):
     except Exception as e:
         print(f"An error occurred: {e}")
         
-def sync_day(day: date, entries: list[Entry]):
-    events_to_remove: list[dict] = []
-    entries_to_remove: list[Entry] = []
+def sync_day(day: date, entries: list[Entry]) -> bool:
+    modified: bool = False
     
     current_events = get_events_for_day(day)
-    for event in current_events:
-        start_time = datetime.fromisoformat(event.get('start').get('dateTime')).time()
-        end_time = datetime.fromisoformat(event.get('end').get('dateTime')).time()
-        for entry in entries:
-            if start_time == entry.start_time and end_time == entry.end_time:
-                entries_to_remove.append(entry)
-                events_to_remove.append(event)
     
+    matched_event_ids = set()
+    matched_entries = []
+    has_closed_event = False
+
+    # 1. Identify what matches and what is an "All Day" event
+    for event in current_events:
+        start_node = event.get('start', {})
+        
+        # Check if it's an All-Day event (has 'date' instead of 'dateTime')
+        if 'date' in start_node:
+            if "Closed" in event.get('summary', ''):
+                has_closed_event = True
+                if not entries:
+                    matched_event_ids.add(event['id'])
+            continue
+
+        # Timed Event Logic
+        try:
+            g_start = datetime.fromisoformat(start_node.get('dateTime')).time()
+            g_end = datetime.fromisoformat(event.get('end', {}).get('dateTime')).time()
+            
+            for entry in entries:
+                if g_start == entry.start_time and g_end == entry.end_time:
+                    matched_entries.append(entry)
+                    matched_event_ids.add(event['id'])
+                    break
+        except (TypeError, ValueError):
+            continue
+
+    # 2. Delete Stale Events
+    # Anything in current_events that wasn't matched above
+    for event in current_events:
+        if event['id'] not in matched_event_ids:
+            delete_event(event['id'])
+            modified = True
+
+    # 3. Handle "Closed" (No entries)
     if not entries:
-        for event in current_events:
-            delete_event(event.get('id'))
-        create_all_day_event('CRWC Competition Pool: Closed', day)
-        return 
+        if not has_closed_event:
+            create_all_day_event('CRWC Competition Pool: Closed', day)
+            modified = True
+        return False
+
+    # 4. Add New Events
+    # Filter out entries that were already matched
+    new_entries = [e for e in entries if e not in matched_entries]
     
-    # Remove from entries and current_events
-    for e in entries_to_remove:
-        entries.remove(e)
-    for e in events_to_remove:
-        current_events.remove(e)
-    
-    # If any events are left in current_events then they are outdated and need to be removed
-    for event in current_events:
-        delete_event(event.get('id'))
-        
-    # Now we can add the new events
     local_tz = ZoneInfo(TIMEZONE)
+    for entry in new_entries:
+        start_dt = datetime.combine(day, entry.start_time, tzinfo=local_tz)
+        end_dt = datetime.combine(day, entry.end_time, tzinfo=local_tz)
+        create_event(entry.info, start_dt.isoformat(), end_dt.isoformat())
+        modified = True
     
-    for entry in entries:
-        start_time = datetime.combine(day, entry.start_time, tzinfo=local_tz)
-        end_time = datetime.combine(day, entry.end_time, tzinfo=local_tz)
-        
-        create_event(entry.info, start_time.isoformat(), end_time.isoformat())
+    return modified
