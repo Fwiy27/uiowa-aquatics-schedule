@@ -7,6 +7,34 @@ from tabulate import tabulate
 from datetime import date, time, datetime
 from dataclasses import dataclass
 
+@dataclass
+class Entry:
+    status: str
+    start_time: time
+    end_time: time
+    info: str
+
+    def to_tuple(self) -> tuple:
+        # 1. noon object for comparison
+        noon = time(12, 0)
+        
+        # 2. Logic for color coding based on noon cross-over
+        if self.start_time < noon and self.end_time <= noon:
+            color = '#5CE65C' # All Morning
+        elif self.start_time < noon and self.end_time > noon:
+            color = '#FFBF00' # Crosses Noon
+        else:
+            color = '#FF2A00' # All Afternoon
+            
+        # 3. Formatting the string
+        # Note: %I is for 12-hour clock (5:30pm), %H is for 24-hour clock (17:30)
+        fmt = '%-I:%M%p'
+        time_str = f"%{color}% {self.start_time.strftime(fmt).lower()} - {self.end_time.strftime(fmt).lower()} %%"
+        
+        return (self.status, time_str, self.info)
+        
+
+
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 
 scraper = cloudscraper.create_scraper()
@@ -46,8 +74,8 @@ def parse_response(response: Response) -> dict:
     
     return insert_command
 
-def get_times_list(insert_command: dict) -> list[tuple] | None:
-    times: list[tuple] = []
+def get_times_list(insert_command: dict) -> list[Entry] | None:
+    times: list[Entry] = []
     soup = BeautifulSoup(insert_command.get("data", ""), "html.parser")
 
     item_list = soup.find("div", class_="item-list")
@@ -58,38 +86,28 @@ def get_times_list(insert_command: dict) -> list[tuple] | None:
     
     for li in li_list:
         badge = li.find(class_="badge")
-        raw_text: str = li.text
-        
-        regex_times = re.findall(r'\d{1,2}:\d{2}(?:am|pm)', raw_text)
-        st, et = regex_times
-        start_time = datetime.strptime(st, '%I:%M%p').time()
-        end_time = datetime.strptime(et, '%I:%M%p').time()
-        
-        noon = time(12, 0)
-        
-        if start_time < noon and end_time < noon:
-            color = '#5CE65C'
-        elif start_time < noon and end_time > noon:
-            color = '#FFBF00'
-        else:
-            color = '#FF2A00'
-        
-        time_str = f"%{color}% {regex_times[0]} - {regex_times[1]} %%"
-        
-        if not badge or not regex_times or not raw_text:
-            raise RuntimeError("Badge or Time not found", badge, regex_times)
-        
+        if not badge:
+            raise RuntimeError('badge not found', li)
         status = badge.text
+        
+        # Parse times with regex
+        raw_text: str = li.text
+        regex_times = re.findall(r'\d{1,2}:\d{2}(?:am|pm)', raw_text)
+        start_time = datetime.strptime(regex_times[0], '%I:%M%p').time()
+        end_time = datetime.strptime(regex_times[1], '%I:%M%p').time()
+        
+        # Get other info from raw_text
         info = raw_text.split("-")[-1].strip()
         
-        times.append((status, time_str, info))
+        # Append entry to list
+        times.append(Entry(status, start_time, end_time, info))
     return times
 
-def to_markdown(times: list[tuple] | None, format: str = "github") -> str:
+def to_markdown(times: list[Entry] | None, format: str = "github") -> str:
     if not times:
         return "!!! danger Closed\n\tCRWC Competition Pool is closed this day"
     headers = ["Status", "Time", "Info"]
-    table = tabulate(times, headers=headers, tablefmt=format)
+    table = tabulate([t.to_tuple() for t in times], headers=headers, tablefmt=format)
     return table
 
 def get_times(date: date) -> str:
