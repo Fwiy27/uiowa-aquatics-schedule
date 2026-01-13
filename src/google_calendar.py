@@ -52,6 +52,25 @@ def create_event(summary, start_time_iso, end_time_iso):
     
     event = service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
     print(f"Event created: {event.get('htmlLink')}")
+
+from datetime import timedelta, date
+
+def create_all_day_event(summary, target_date: date):
+    # End date must be the day AFTER the event for it to show as a single day
+    end_date = target_date + timedelta(days=1)
+    
+    event_body = {
+        'summary': summary,
+        'start': {
+            'date': target_date.isoformat(), # Result: '2026-01-13'
+        },
+        'end': {
+            'date': end_date.isoformat(),    # Result: '2026-01-14'
+        },
+    }
+    
+    event = service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
+    print(f"All-day event created: {event.get('htmlLink')}")
     
 def delete_event(event_id):
     try:
@@ -67,7 +86,7 @@ def sync_day(day: date, entries: list[Entry]):
     events_to_remove: list[dict] = []
     entries_to_remove: list[Entry] = []
     
-    current_events = set(get_events_for_day(day))
+    current_events = get_events_for_day(day)
     for event in current_events:
         start_time = datetime.fromisoformat(event.get('start').get('dateTime')).time()
         end_time = datetime.fromisoformat(event.get('end').get('dateTime')).time()
@@ -75,6 +94,12 @@ def sync_day(day: date, entries: list[Entry]):
             if start_time == entry.start_time and end_time == entry.end_time:
                 entries_to_remove.append(entry)
                 events_to_remove.append(event)
+    
+    if not entries:
+        for event in current_events:
+            delete_event(event.get('id'))
+        create_all_day_event('CRWC Competition Pool: Closed', day)
+        return 
     
     # Remove from entries and current_events
     for e in entries_to_remove:
