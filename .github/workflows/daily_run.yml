@@ -1,0 +1,35 @@
+name: Daily Calendar Update
+on:
+  schedule:
+    - cron: "0 2,10 * * *"
+  workflow_dispatch:
+
+env:
+  CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
+  TIMEZONE: ${{ secrets.TIMEZONE }}
+  NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+  SERVICE_ACCOUNT_FILE: "keys/service_account.json"
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Create keys directory and JSON file
+        run: |
+          mkdir -p keys
+          echo '${{ secrets.SERVICE_ACCOUNT_JSON }}' > keys/service_account.json
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run script
+        run: uv run main.py
