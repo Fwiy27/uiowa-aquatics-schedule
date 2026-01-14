@@ -131,6 +131,7 @@ def sync_day(day: date, entries: list[Entry]) -> bool:
         if not has_closed_event:
             create_all_day_event('CRWC Competition Pool: Closed', day)
             modified = True
+            return True
         return False
 
     # 4. Add New Events

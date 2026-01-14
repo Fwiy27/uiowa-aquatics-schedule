@@ -38,11 +38,13 @@ while current_date <= to_day:
     current_date += timedelta(days=1)
     
 if dates_modified:
-        dates = [d.isoformat() for d in sorted(list(dates_modified))]
-        notification = "Updated following dates:\n" + '\n'.join(dates)
-        
-        headers = {
-            'title': 'Updated UIOWA Aquatic Calendar'
-        }
-        
-        requests.post(f'http://ntfy.sh/{NTFY_TOPIC}', data=notification, headers=headers)
+    dates = [d.isoformat() for d in sorted(list(dates_modified))]
+    notification = '\n'.join(dates)
+    
+    print('Dates modified: ' + ', '.join(dates))
+    
+    headers = {
+        'title': 'Updated UIOWA Aquatic Calendar'
+    }
+    
+    requests.post(f'http://ntfy.sh/{NTFY_TOPIC}', data=notification, headers=headers)
