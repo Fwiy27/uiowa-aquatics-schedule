@@ -19,16 +19,25 @@ class Entry:
 
     def hash(self) -> str:
         return f'{self.status}{self.start_time.isoformat()}{self.end_time.isoformat()}{self.info}'
+
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 
 scraper = cloudscraper.create_scraper()
 scraper.headers.update({
     "User-Agent": USER_AGENT,
     "Accept": "*/*",
-    "HX-Request": "true",  # Enable HTMX/JSON responses
+    "HX-Request": "true"
 })
 
-def get_entries(date: date) -> list[Entry] | None:
+def get_entries(date: date) -> list[Entry]:
+    """Get swimming time entries for a specific date in a list of 'Entry' objects 
+
+    Args:
+        date (date): Date to check for swim times
+
+    Returns:
+        list[Entry] | None: List of 'Entry' objects if there are times to swim on this date otherwise 'None'
+    """
     URL = "https://recserv.uiowa.edu/aquatics"
     
     payload = {
@@ -56,7 +65,7 @@ def get_entries(date: date) -> list[Entry] | None:
 
     item_list = soup.find("div", class_="item-list")
     if not item_list:
-        return None
+        return []
     
     li_list = item_list.find_all("li")
     

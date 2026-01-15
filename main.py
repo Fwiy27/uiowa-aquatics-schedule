@@ -1,20 +1,21 @@
-from src.google_calendar import get_events_for_day, create_event, delete_event, sync_day
+from src.google_calendar import sync_day
 from src.scraper import get_entries
-from datetime import date, timedelta
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import calendar
 import requests
-
-from dotenv import load_dotenv
-
-import requests
 import os
+
 
 load_dotenv()
 
 NTFY_TOPIC = os.getenv('NTFY_TOPIC')
+TIMEZONE = os.getenv('TIMEZONE', 'America/Chicago')
 
 # TODAY
-from_day = date.today()
+from_day = datetime.now(ZoneInfo(TIMEZONE)).date()
 # LAST DAY OF THE NEXT MONTH
 to_day = from_day + timedelta(days=32)
 _, last_day_num = calendar.monthrange(to_day.year, to_day.month)
@@ -22,29 +23,27 @@ to_day = to_day.replace(day=last_day_num)
 
 print(f'Managing events from {from_day.isoformat()} to {to_day.isoformat()}')
 
-dates_modified = set()
+notifications: list[str] = []
 
 current_date = from_day
 while current_date <= to_day:
     print(current_date.isoformat())
     entries = get_entries(current_date)
 
-    entries = entries or []
-    
-    modified = sync_day(current_date, entries)
-    if modified:
-        dates_modified.add(current_date)
+    notification = sync_day(current_date, entries)
+    if notification:
+        print(f'\t{notification}')
+        notifications.append(f'{current_date.isoformat()}: {notification}')
         
     current_date += timedelta(days=1)
     
-if dates_modified:
-    dates = [d.isoformat() for d in sorted(list(dates_modified))]
-    notification = '\n'.join(dates)
-    
-    print('Dates modified: ' + ', '.join(dates))
-    
+if notifications:
     headers = {
-        'title': 'Updated UIOWA Aquatic Calendar'
+        'Title': 'Updated UIOWA Aquatic Calendar'
     }
     
-    requests.post(f'http://ntfy.sh/{NTFY_TOPIC}', data=notification, headers=headers)
+    try:
+        response = requests.post(f'https://ntfy.sh/{NTFY_TOPIC}', data='\n'.join(notifications), headers=headers)
+        response.raise_for_status()
+    except:
+        print('Error notifying with ntfy')
