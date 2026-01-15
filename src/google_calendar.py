@@ -50,6 +50,7 @@ NTFY_TOPIC = os.getenv('NTFY_TOPIC')
 CALENDAR_ID = os.getenv("CALENDAR_ID")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE")
 TIMEZONE = os.getenv("TIMEZONE", "America/Chicago")
+TIMEZONE_CODE = os.getenv("TIMEZONE_CODE", "CT")
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
@@ -151,18 +152,25 @@ def create_event(event: Event) -> None:
     
     event.id = e.get("id")
 
-def delete_event(event: Event):
+def delete_event(event: Event, include_past_events: bool = False) -> bool:
     """Delete event from the calendar
 
     Args:
         event (Event): Event to delete from calendar; must have id
+        include_past_events (bool): True = will delete past events, False = does nothing to past events
     """
-    service.events().delete(
-        calendarId=CALENDAR_ID,
-        eventId=event.id
-    ).execute()
+    local_tz = ZoneInfo(TIMEZONE)
+    now = datetime.now(local_tz)
     
-    event.id = None
+    if include_past_events or event.is_all_day or now < event.start:
+        service.events().delete(
+            calendarId=CALENDAR_ID,
+            eventId=event.id
+        ).execute()
+        
+        event.id = None
+        return True
+    return False
     
 def update_event(event: Event) -> None:
     """Update event on the calendar
@@ -212,64 +220,73 @@ def update_event(event: Event) -> None:
         body=existing
     ).execute()
 
-# def sync_day(day: date, entries: list[Entry]) -> bool:
-#     modified: bool = False
-    
-#     current_events = get_events_for_day(day)
-    
-#     matched_event_ids = set()
-#     matched_entries = []
-#     has_closed_event = False
 
-#     # 1. Identify what matches and what is an "All Day" event
-#     for event in current_events:
-#         start_node = event.get('start', {})
+def sync_day(day: date, entries: list[Entry]) -> str | None:
+    events: list[Event] = get_events_for_day(day)
+    
+    new_description = f'Accurate as of {datetime.now().strftime('%-I:%M%p')} {TIMEZONE_CODE}'
+    
+    if not entries:
+        # Make sure there is only closed event otherwise add it
+        if len(events) > 1: # Remove all events and add closed event
+            for event in events: delete_event(event)
+            return 'Open -> Closed'
+        elif len(events) == 1 and 'Closed' in events[0].title: # Keep event; update description
+            events[0].description = new_description
+            update_event(events[0])
+        else: # Remove any events and add closed event
+            for event in events: delete_event(event)
+            e = Event(True, None, 'CRWC Competition Pool: Closed', new_description, day)
+            create_event(e)
+            return 'Unknown -> Closed'
+        return
+    
+    was_closed = len(events) == 1 and 'Closed' in events[0].title
+    starting_events = len(events)  
+    
+    matched_events: list[Event] = []
+    matched_entries: list[Entry] = []
+    
+    # Match entries to events
+    for event in events:
+        for entry in entries:
+            if event.is_all_day or not isinstance(event.start, datetime) or not isinstance(event.end, datetime):
+                pass # This is an all day event and will not match with any events
+            elif event.start.time() == entry.start_time and event.end.time() == entry.end_time:
+                # Matched events; update description and add to matched
+                event.description = new_description
+                update_event(event)
+                matched_events.append(event)
+                matched_entries.append(entry)
+                break
+    
+    # Remove matches from pool
+    for event in matched_events:
+        events.remove(event)
+    for entry in matched_entries:
+        entries.remove(entry)
         
-#         # Check if it's an All-Day event (has 'date' instead of 'dateTime')
-#         if 'date' in start_node:
-#             if "Closed" in event.get('summary', ''):
-#                 has_closed_event = True
-#                 if not entries:
-#                     matched_event_ids.add(event['id'])
-#             continue
-
-#         # Timed Event Logic
-#         try:
-#             g_start = datetime.fromisoformat(start_node.get('dateTime')).time()
-#             g_end = datetime.fromisoformat(event.get('end', {}).get('dateTime')).time()
-            
-#             for entry in entries:
-#                 if g_start == entry.start_time and g_end == entry.end_time:
-#                     matched_entries.append(entry)
-#                     matched_event_ids.add(event['id'])
-#                     break
-#         except (TypeError, ValueError):
-#             continue
-
-#     # 2. Delete Stale Events
-#     # Anything in current_events that wasn't matched above
-#     for event in current_events:
-#         if event['id'] not in matched_event_ids:
-#             delete_event(event['id'])
-#             modified = True
-
-#     # 3. Handle "Closed" (No entries)
-#     if not entries:
-#         if not has_closed_event:
-#             create_all_day_event('CRWC Competition Pool: Closed', day)
-#             modified = True
-#             return True
-#         return False
-
-#     # 4. Add New Events
-#     # Filter out entries that were already matched
-#     new_entries = [e for e in entries if e not in matched_entries]
+    # Remove events that were not matched
+    new_info = False
+    if events:
+        for event in events:
+            if delete_event(event):
+                new_info = True
+    else:
+        new_info = False
     
-#     local_tz = ZoneInfo(TIMEZONE)
-#     for entry in new_entries:
-#         start_dt = datetime.combine(day, entry.start_time, tzinfo=local_tz)
-#         end_dt = datetime.combine(day, entry.end_time, tzinfo=local_tz)
-#         create_event(entry.info, start_dt.isoformat(), end_dt.isoformat())
-#         modified = True
+    count = len(matched_events)
+    # Add entries that were not matched
+    for entry in entries:
+        start = datetime.combine(day, entry.start_time)
+        end = datetime.combine(day, entry.end_time)
+        event = Event(False, None, entry.info, new_description, start, end)
+        create_event(event)
+        new_info = True
+        count += 1
     
-#     return modified
+    if new_info:
+        return f'{'Closed' if was_closed else starting_events} -> {count}'
+    return None
+    
+    

@@ -29,7 +29,7 @@ scraper.headers.update({
     "HX-Request": "true"
 })
 
-def get_entries(date: date) -> list[Entry] | None:
+def get_entries(date: date) -> list[Entry]:
     """Get swimming time entries for a specific date in a list of 'Entry' objects 
 
     Args:
@@ -65,7 +65,7 @@ def get_entries(date: date) -> list[Entry] | None:
 
     item_list = soup.find("div", class_="item-list")
     if not item_list:
-        return None
+        return []
     
     li_list = item_list.find_all("li")
     
