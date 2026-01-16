@@ -50,7 +50,6 @@ NTFY_TOPIC = os.getenv('NTFY_TOPIC')
 CALENDAR_ID = os.getenv("CALENDAR_ID")
 SERVICE_ACCOUNT_FILE = os.getenv("SERVICE_ACCOUNT_FILE")
 TIMEZONE = os.getenv("TIMEZONE", "America/Chicago")
-TIMEZONE_CODE = os.getenv("TIMEZONE_CODE", "CT")
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
@@ -159,8 +158,7 @@ def delete_event(event: Event, include_past_events: bool = False) -> bool:
         event (Event): Event to delete from calendar; must have id
         include_past_events (bool): True = will delete past events, False = does nothing to past events
     """
-    local_tz = ZoneInfo(TIMEZONE)
-    now = datetime.now(local_tz)
+    now = datetime.now(ZoneInfo(TIMEZONE))
     
     if include_past_events or event.is_all_day or now < event.start:
         service.events().delete(
@@ -224,13 +222,13 @@ def update_event(event: Event) -> None:
 def sync_day(day: date, entries: list[Entry]) -> str | None:
     events: list[Event] = get_events_for_day(day)
     
-    new_description = f'Accurate as of {datetime.now().strftime('%-I:%M%p')} {TIMEZONE_CODE}'
+    new_description = f'Accurate as of {datetime.now(ZoneInfo(TIMEZONE)).strftime("%b %d, %I:%M %p %Z")}'
     
     if not entries:
         # Make sure there is only closed event otherwise add it
         if len(events) > 1: # Remove all events and add closed event
-            for event in events: delete_event(event)
-            return 'Open -> Closed'
+            results = [delete_event(event) for event in events] # Check to see if any events were actually deleted
+            return 'Open -> Closed' if any(results) else None
         elif len(events) == 1 and 'Closed' in events[0].title: # Keep event; update description
             events[0].description = new_description
             update_event(events[0])
@@ -239,7 +237,7 @@ def sync_day(day: date, entries: list[Entry]) -> str | None:
             e = Event(True, None, 'CRWC Competition Pool: Closed', new_description, day)
             create_event(e)
             return 'Unknown -> Closed'
-        return
+        return None
     
     was_closed = len(events) == 1 and 'Closed' in events[0].title
     starting_events = len(events)  
