@@ -1,8 +1,6 @@
 name: Daily Calendar Update
 on:
-  schedule:
-    - cron: "0 2,10 * * *"
-  workflow_dispatch:
+  workflow_dispatch: # Runs twice daily with cron-job.org
 
 env:
   CALENDAR_ID: ${{ secrets.CALENDAR_ID }}
